@@ -1,0 +1,14 @@
+tiktoken
+datasets
+kaldialign
+openai-whisper
+librosa
+soundfile
+safetensors
+transformers
+janus
+tritonclient[grpc]==2.31
+scipy
+numpy
+huggingface_hub[cli]
+tensorrt-llm==0.15.0.dev2024101500
