@@ -1,0 +1,10 @@
+FROM nvcr.io/nvidia/tritonserver:24.09-trtllm-python-py3
+
+WORKDIR /workspace
+COPY requirements.txt .
+COPY prepare.sh .
+COPY fill_template.py .
+COPY convert_checkpoint.py .
+COPY model_repo_whisper_trtllm model_repo_whisper_trtllm
+
+RUN python3 -m pip install -r requirements.txt
