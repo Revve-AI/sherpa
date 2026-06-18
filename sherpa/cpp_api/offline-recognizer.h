@@ -18,6 +18,13 @@
 namespace sherpa {
 
 struct OfflineCtcDecoderConfig {
+  // Which CTC decoder to use.
+  //   - "one-best"          : k2-based HLG/CTC-topo one-best (default,
+  //                           legacy behavior, supports --hlg).
+  //   - "prefix-beam-search": label-space prefix beam search, supports
+  //                           contextual biasing via create_stream(contexts).
+  std::string method = "one-best";
+
   // Used only for decoding with a CTC topology
   // true to use a modified CTC topology.
   // false to use a standard CTC topology.
@@ -31,6 +38,14 @@ struct OfflineCtcDecoderConfig {
   float output_beam = 8;
   int32_t min_active_states = 30;
   int32_t max_active_states = 10000;
+
+  // Used only when method == "prefix-beam-search".
+  // Beam size (number of active prefixes kept per frame).
+  int32_t num_active_paths = 8;
+
+  // Used only when method == "prefix-beam-search".
+  // Top-K vocab tokens considered per frame; 0 means use full vocab.
+  int32_t top_k = 0;
 
   void Register(ParseOptions *po);
   void Validate() const;
@@ -77,6 +92,17 @@ struct OfflineRecognizerConfig {
 
   // temperature for the softmax in the joiner
   float temperature = 1.0;
+
+  /// Constant subtracted from the blank logit before softmax in transducer
+  /// greedy / modified_beam_search. Positive values discourage blank and
+  /// help against deletion of repeated tokens. 0 disables.
+  float blank_penalty = 0.0f;
+
+  /// Maximum number of non-blank symbols emitted per encoder frame in
+  /// transducer greedy_search. icefall default = 1. Set 2-3 to allow fast
+  /// speech / repeated tokens to surface within a single frame.
+  /// Ignored by modified_beam_search (which keeps the 1 sym/frame structure).
+  int32_t max_sym_per_frame = 1;
 
   void Register(ParseOptions *po);
 

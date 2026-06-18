@@ -83,7 +83,71 @@ cd /path/to/sherpa
   ./wav2vec2.0-torchaudio/test_wavs/1221-135766-0001.wav \
   ./wav2vec2.0-torchaudio/test_wavs/1221-135766-0002.wav
 
-(4) Use NeMo CTC models
+(4) Use icefall Zipformer2 + CTC (HLG, 1best)
+
+cd /path/to/sherpa
+
+# Export `cpu_jit.pt` with icefall's zipformer/export.py using --use-ctc 1
+# (the resulting torchscript class name is "AsrModel"). Then build/compile
+# an HLG.pt for your lang dir (icefall: local/compile_hlg.py).
+
+# (a) Decoding with H (CTC topo only — no HLG)
+
+./sherpa/bin/offline_ctc_asr.py \
+  --nn-model ./zipformer-ctc-exp/cpu_jit.pt \
+  --tokens   ./zipformer-ctc-exp/data/lang_bpe_500/tokens.txt \
+  --use-gpu  false \
+  ./test_wavs/1089-134686-0001.wav \
+  ./test_wavs/1221-135766-0001.wav
+
+# (b) Decoding with HLG (1-best)
+
+./sherpa/bin/offline_ctc_asr.py \
+  --nn-model ./zipformer-ctc-exp/cpu_jit.pt \
+  --tokens   ./zipformer-ctc-exp/data/lang_bpe_500/tokens.txt \
+  --HLG      ./zipformer-ctc-exp/data/lang_bpe_500/HLG.pt \
+  --lm-scale 0.9 \
+  --use-gpu  false \
+  ./test_wavs/1089-134686-0001.wav \
+  ./test_wavs/1221-135766-0001.wav
+
+(4c) Contextual biasing with prefix-beam-search (no HLG)
+
+# Bias the decoder toward a custom list of (possibly OOV) phrases. The
+# search runs in BPE label space — no HLG/lexicon is consulted, so genuine
+# OOV words can be added at runtime.
+
+# Step 1: prepare contexts.txt — one phrase per line. Two accepted formats
+# per line:
+#   - plain text  : tokenized at runtime via --bpe-model (sentencepiece)
+#   - "INT INT .."  : pre-tokenized token IDs (no --bpe-model needed)
+#
+# Example contexts.txt:
+#   NGUYỄN TRUNG TRỰC
+#   SHERPA
+#   ZIPFORMER
+
+./sherpa/bin/offline_ctc_asr.py \
+  --nn-model           ./zipformer-ctc-exp/cpu_jit.pt \
+  --tokens             ./zipformer-ctc-exp/data/lang_bpe_500/tokens.txt \
+  --ctc-decoding-method prefix-beam-search \
+  --ctc-num-active-paths 8 \
+  --contexts-file      ./contexts.txt \
+  --bpe-model          ./zipformer-ctc-exp/data/lang_bpe_500/bpe.model \
+  --context-score      2.0 \
+  --use-gpu false \
+  test.wav
+
+# Option A (alternative, offline): rebuild HLG with extra lexicon entries.
+# This keeps you on the --HLG path but requires:
+#   1) Add new words + pronunciation (BPE pieces) to lang_bpe_500/lexicon.txt
+#      (use G2P or eSpeak for unknown words).
+#   2) Re-run icefall: `python local/compile_hlg.py --lang-dir data/lang_bpe_500`
+#   3) Re-point --HLG at the new HLG.pt. No code change needed in sherpa.
+# Recommended when the context list is static; prefix-beam-search above is
+# better for runtime-mutable lists or true OOV.
+
+(5) Use NeMo CTC models
 
 GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/csukuangfj/sherpa-nemo-ctc-en-citrinet-512
 cd sherpa-nemo-ctc-en-citrinet-512
@@ -254,6 +318,73 @@ def add_decoding_args(parser: argparse.ArgumentParser):
         number if no constraint is needed.""",
     )
 
+    parser.add_argument(
+        "--ctc-decoding-method",
+        type=str,
+        default="one-best",
+        choices=[
+            "one-best",
+            "prefix-beam-search",
+            "prefix-beam-search-shallow-fusion",
+        ],
+        help="""CTC decoding method.
+        - one-best: k2-based HLG/CTC-topo one-best (default, supports --HLG).
+        - prefix-beam-search: label-space prefix beam search with optional
+          contextual biasing via --contexts-file (does NOT use HLG).
+        - prefix-beam-search-shallow-fusion: port of icefall's
+          `ctc_prefix_beam_search_shallow_fussion` (decode.py). Same
+          contextual biasing path as `prefix-beam-search`; NNLM/LODR LM
+          fusion is currently a no-op (placeholder for future --lm-model
+          support). `--ctc-num-active-paths` controls both beam size AND
+          per-frame top-K vocab (icefall uses a single `beam` arg).
+        """,
+    )
+
+    parser.add_argument(
+        "--ctc-num-active-paths",
+        type=int,
+        default=8,
+        help="Beam size for --ctc-decoding-method=prefix-beam-search.",
+    )
+
+    parser.add_argument(
+        "--ctc-top-k",
+        type=int,
+        default=0,
+        help="""Top-K vocab pruning per frame for prefix-beam-search.
+        0 means use full vocab.""",
+    )
+
+    parser.add_argument(
+        "--contexts-file",
+        type=str,
+        default="",
+        help="""Path to a file of contextual-biasing phrases (one per line).
+        Used only when --ctc-decoding-method=prefix-beam-search. Each line
+        is either:
+          (a) a space-separated list of token IDs (pre-tokenized), or
+          (b) plain text — in which case --bpe-model must be given so we can
+              tokenize via sentencepiece.
+        """,
+    )
+
+    parser.add_argument(
+        "--bpe-model",
+        type=str,
+        default="",
+        help="""Path to the sentencepiece BPE model used during training.
+        Required only when --contexts-file contains plain text. Install via
+        `pip install sentencepiece`.""",
+    )
+
+    parser.add_argument(
+        "--context-score",
+        type=float,
+        default=1.5,
+        help="""Per-token bonus added when a beam advances along a context
+        phrase. Used only when --contexts-file is non-empty.""",
+    )
+
 
 def check_args(args):
     if not Path(args.nn_model).is_file():
@@ -265,10 +396,152 @@ def check_args(args):
     if args.HLG:
         assert Path(args.HLG).is_file(), f"{args.HLG} does not exist"
 
+    if args.contexts_file:
+        if args.ctc_decoding_method not in (
+            "prefix-beam-search",
+            "prefix-beam-search-shallow-fusion",
+        ):
+            raise ValueError(
+                "--contexts-file requires --ctc-decoding-method in "
+                "{prefix-beam-search, prefix-beam-search-shallow-fusion}"
+            )
+        if not Path(args.contexts_file).is_file():
+            raise ValueError(f"{args.contexts_file} does not exist")
+        if args.bpe_model and not Path(args.bpe_model).is_file():
+            raise ValueError(f"{args.bpe_model} does not exist")
+
     assert len(args.sound_files) > 0, args.sound_files
     for f in args.sound_files:
         if not Path(f).is_file():
             raise ValueError(f"{f} does not exist")
+
+
+def load_contexts(args) -> List[List[int]]:
+    """Read --contexts-file into a list of token-ID lists.
+
+    Each non-empty / non-comment line is one biasing phrase. Accepted formats:
+      (1) Pre-tokenized: space-separated integer token IDs.
+      (2) Plain text: tokenized via tokens.txt lookup. Each whitespace-split
+          word is looked up as "▁<word>" (icefall BPE word-initial form),
+          then as "<word>". If every word resolves, no extra dependency
+          is needed — handy when context phrases are common in-vocab words.
+      (3) Plain text + --bpe-model: tokenize via sentencepiece. Required
+          when any word is OOV w.r.t. tokens.txt.
+    Detection is per-file: (1) wins if every line parses as ints; otherwise
+    we try (2), and fall back to (3) only on unresolved words.
+    """
+    if not args.contexts_file:
+        return []
+
+    raw_lines: List[str] = []
+    with open(args.contexts_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            raw_lines.append(line)
+
+    if not raw_lines:
+        return []
+
+    def parse_int_line(s: str):
+        try:
+            return [int(x) for x in s.split()]
+        except ValueError:
+            return None
+
+    parsed = [parse_int_line(l) for l in raw_lines]
+    if all(p is not None for p in parsed):
+        return parsed  # format (1)
+
+    # Build symbol -> id map from tokens.txt (format 2 / fallback for 3).
+    sym2id = {}
+    with open(args.tokens, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.rstrip("\n").split()
+            if len(parts) < 2:
+                continue
+            sym2id[parts[0]] = int(parts[1])
+
+    def tokenize_with_table(phrase: str):
+        ids = []
+        unknown = []
+        for w in phrase.split():
+            key = "▁" + w  # ▁ word-initial marker used by icefall BPE
+            if key in sym2id:
+                ids.append(sym2id[key])
+            elif w in sym2id:
+                ids.append(sym2id[w])
+            else:
+                unknown.append(w)
+        return ids, unknown
+
+    results: List[List[int]] = []
+    unresolved_lines: List[int] = []
+    for i, line in enumerate(raw_lines):
+        ids, unknown = tokenize_with_table(line)
+        if unknown:
+            unresolved_lines.append(i)
+            results.append(None)
+        else:
+            results.append(ids)
+
+    if not unresolved_lines:
+        return results  # format (2)
+
+    # Format (3): sentencepiece tokenization — closest match to training.
+    if args.bpe_model:
+        import sentencepiece as spm
+
+        sp = spm.SentencePieceProcessor()
+        sp.load(args.bpe_model)
+        for i in unresolved_lines:
+            results[i] = sp.encode(raw_lines[i], out_type=int)
+        return results
+
+    # Format (3b): greedy longest-prefix-match fallback using tokens.txt.
+    # No merge rules → may differ from training-time BPE segmentation; usually
+    # close enough for biasing purposes. Pass --bpe-model for exact match.
+    def greedy_tokenize(phrase: str):
+        ids = []
+        for word in phrase.split():
+            rem = "▁" + word  # icefall word-initial marker
+            while rem:
+                match_id = None
+                match_len = 0
+                for L in range(len(rem), 0, -1):
+                    cand = rem[:L]
+                    if cand in sym2id:
+                        match_id = sym2id[cand]
+                        match_len = L
+                        break
+                if match_id is None:
+                    return None  # even single char not in vocab
+                ids.append(match_id)
+                rem = rem[match_len:]
+        return ids
+
+    failures = []
+    for i in unresolved_lines:
+        ids = greedy_tokenize(raw_lines[i])
+        if ids is None:
+            failures.append(raw_lines[i])
+        else:
+            results[i] = ids
+
+    if failures:
+        raise ValueError(
+            f"Cannot tokenize {len(failures)} context line(s) even with "
+            f"greedy fallback. Pass --bpe-model <bpe.model> for exact "
+            f"BPE encoding. Examples: {failures[:3]}"
+        )
+
+    logging.warning(
+        f"{len(unresolved_lines)} context phrase(s) tokenized via greedy "
+        f"longest-prefix fallback (no --bpe-model). Segmentation may differ "
+        f"from training BPE; pass --bpe-model for exact match."
+    )
+    return results
 
 
 def read_sound_files(
@@ -310,6 +583,7 @@ def create_recognizer(args):
     feat_config.nemo_normalize = args.nemo_normalize
 
     ctc_decoder_config = sherpa.OfflineCtcDecoderConfig(
+        method=args.ctc_decoding_method,
         hlg=args.HLG if args.HLG else "",
         lm_scale=args.lm_scale,
         modified=args.modified,
@@ -317,6 +591,8 @@ def create_recognizer(args):
         output_beam=args.output_beam,
         min_active_states=args.min_active_states,
         max_active_states=args.max_active_states,
+        num_active_paths=args.ctc_num_active_paths,
+        top_k=args.ctc_top_k,
     )
 
     config = sherpa.OfflineRecognizerConfig(
@@ -325,6 +601,7 @@ def create_recognizer(args):
         use_gpu=args.use_gpu,
         feat_config=feat_config,
         ctc_decoder_config=ctc_decoder_config,
+        context_score=args.context_score,
     )
 
     recognizer = sherpa.OfflineRecognizer(config)
@@ -345,9 +622,18 @@ def main():
         sample_rate,
     )
 
+    contexts = load_contexts(args)
+    if contexts:
+        logging.info(
+            f"Loaded {len(contexts)} contextual phrases from {args.contexts_file}"
+        )
+
     streams: List[sherpa.OfflineStream] = []
     for s in samples:
-        stream = recognizer.create_stream()
+        if contexts:
+            stream = recognizer.create_stream(contexts)
+        else:
+            stream = recognizer.create_stream()
         stream.accept_samples(s)
         streams.append(stream)
 

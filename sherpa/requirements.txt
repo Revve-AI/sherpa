@@ -1,4 +1,0 @@
-websockets
-kaldifeat
-sentencepiece>=0.1.96
-numpy

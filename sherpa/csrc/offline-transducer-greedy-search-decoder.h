@@ -14,8 +14,12 @@ namespace sherpa {
 
 class OfflineTransducerGreedySearchDecoder : public OfflineTransducerDecoder {
  public:
-  explicit OfflineTransducerGreedySearchDecoder(OfflineTransducerModel *model)
-      : model_(model) {}
+  explicit OfflineTransducerGreedySearchDecoder(OfflineTransducerModel *model,
+                                                float blank_penalty = 0.0f,
+                                                int32_t max_sym_per_frame = 1)
+      : model_(model),
+        blank_penalty_(blank_penalty),
+        max_sym_per_frame_(max_sym_per_frame) {}
 
   /** Run greedy search given the output from the encoder model.
    *
@@ -33,6 +37,8 @@ class OfflineTransducerGreedySearchDecoder : public OfflineTransducerDecoder {
 
  private:
   OfflineTransducerModel *model_;  // Not owned
+  float blank_penalty_;
+  int32_t max_sym_per_frame_;
 };
 
 }  // namespace sherpa

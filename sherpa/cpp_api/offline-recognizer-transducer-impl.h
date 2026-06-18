@@ -72,11 +72,12 @@ class OfflineRecognizerTransducerImpl : public OfflineRecognizerImpl {
     WarmUp();
 
     if (config.decoding_method == "greedy_search") {
-      decoder_ =
-          std::make_unique<OfflineTransducerGreedySearchDecoder>(model_.get());
+      decoder_ = std::make_unique<OfflineTransducerGreedySearchDecoder>(
+          model_.get(), config.blank_penalty, config.max_sym_per_frame);
     } else if (config.decoding_method == "modified_beam_search") {
       decoder_ = std::make_unique<OfflineTransducerModifiedBeamSearchDecoder>(
-          model_.get(), config.num_active_paths, config.temperature);
+          model_.get(), config.num_active_paths, config.temperature,
+          config.blank_penalty);
     } else if (config.decoding_method == "fast_beam_search") {
       config.fast_beam_search_config.Validate();
 

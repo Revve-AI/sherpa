@@ -107,27 +107,50 @@ OfflineTransducerGreedySearchDecoder::Decode(torch::Tensor encoder_out,
       decoder_out = decoder_out.index({Slice(0, cur_batch_size)});
     }
 
-    auto logits = model_->RunJoiner(cur_encoder_out, decoder_out.unsqueeze(1));
-    // logits' shape is (cur_batch_size, 1, 1, vocab_size)
-    // logits is the output of nn.Linear. Since we are using greedy search
-    // and only the magnitude matters, we don't invoke log_softmax here
+    // Inner loop: emit up to max_sym_per_frame_ non-blank symbols at this
+    // encoder frame. Per-utterance counter `sym_in_frame[k]` enforces the
+    // cap; when no hyp emits non-blank in a step, we break to t+1.
+    int32_t max_steps = std::max(1, max_sym_per_frame_);
+    std::vector<int32_t> sym_in_frame(cur_batch_size, 0);
 
-    logits = logits.squeeze(1).squeeze(1);
-    auto max_indices = logits.argmax(/*dim*/ -1).cpu();
-    auto max_indices_accessor = max_indices.accessor<int64_t, 1>();
-    bool emitted = false;
-    for (int32_t k = 0; k != cur_batch_size; ++k) {
-      auto index = max_indices_accessor[k];
-      if (index != blank_id) {
-        emitted = true;
-        results[k].tokens.push_back(index);
-        results[k].timestamps.push_back(t);
+    for (int32_t step = 0; step < max_steps; ++step) {
+      auto logits =
+          model_->RunJoiner(cur_encoder_out, decoder_out.unsqueeze(1));
+      // logits shape: (cur_batch_size, 1, 1, vocab_size)
+      logits = logits.squeeze(1).squeeze(1);
+
+      // Discourage blank emission if requested. greedy uses raw logits;
+      // subtracting a constant from blank's logit is the standard knob.
+      if (blank_penalty_ > 0.0f) {
+        logits.index({torch::indexing::Slice(), blank_id}) -= blank_penalty_;
       }
-    }
 
-    if (emitted) {
-      BuildDecoderInput(results, &decoder_input);
-      decoder_out = model_->RunDecoder(decoder_input.to(device));
+      auto max_indices = logits.argmax(/*dim*/ -1).cpu();
+      auto max_indices_accessor = max_indices.accessor<int64_t, 1>();
+
+      bool emitted_this_step = false;
+      for (int32_t k = 0; k != cur_batch_size; ++k) {
+        if (sym_in_frame[k] >= max_steps) continue;
+        auto index = max_indices_accessor[k];
+        if (index != blank_id) {
+          results[k].tokens.push_back(index);
+          results[k].timestamps.push_back(t);
+          sym_in_frame[k] += 1;
+          emitted_this_step = true;
+        }
+      }
+
+      if (!emitted_this_step) break;  // everyone blanked → next encoder frame
+
+      // Re-evaluate joiner next step only if we might still emit more.
+      if (step + 1 < max_steps) {
+        BuildDecoderInput(results, &decoder_input);
+        decoder_out = model_->RunDecoder(decoder_input.to(device));
+      } else {
+        // Final emission of this frame: update decoder_out for next t.
+        BuildDecoderInput(results, &decoder_input);
+        decoder_out = model_->RunDecoder(decoder_input.to(device));
+      }
     }
   }  // for (int32_t t = 0; t != max_T; ++t) {
 

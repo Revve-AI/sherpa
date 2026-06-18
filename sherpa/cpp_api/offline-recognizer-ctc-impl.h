@@ -12,14 +12,18 @@
 
 #include "sherpa/cpp_api/feature-config.h"
 #include "sherpa/cpp_api/offline-recognizer-impl.h"
+#include "sherpa/csrc/context-graph.h"
 #include "sherpa/csrc/log.h"
 #include "sherpa/csrc/offline-conformer-ctc-model.h"
 #include "sherpa/csrc/offline-ctc-decoder.h"
 #include "sherpa/csrc/offline-ctc-model.h"
 #include "sherpa/csrc/offline-ctc-one-best-decoder.h"
+#include "sherpa/csrc/offline-ctc-prefix-beam-search-decoder.h"
+#include "sherpa/csrc/offline-ctc-prefix-beam-search-shallow-fusion-decoder.h"
 #include "sherpa/csrc/offline-nemo-enc-dec-ctc-model-bpe.h"
 #include "sherpa/csrc/offline-wav2vec2-ctc-model.h"
 #include "sherpa/csrc/offline-wenet-conformer-ctc-model.h"
+#include "sherpa/csrc/offline-zipformer2-ctc-model.h"
 #include "sherpa/csrc/symbol-table.h"
 
 namespace sherpa {
@@ -76,6 +80,13 @@ class OfflineRecognizerCtcImpl : public OfflineRecognizerImpl {
       // https://github.com/k2-fsa/icefall/blob/master/egs/librispeech/ASR/conformer_ctc/conformer.py#L27
       model_ =
           std::make_unique<OfflineConformerCtcModel>(config.nn_model, device_);
+    } else if (class_name == "AsrModel") {
+      // This one is from icefall zipformer (Zipformer2 + CTC head),
+      // exported by
+      // https://github.com/k2-fsa/icefall/blob/master/egs/librispeech/ASR/zipformer/export.py
+      // with --use-ctc 1 (the scripted nn.Module class name is "AsrModel").
+      model_ = std::make_unique<OfflineZipformer2CtcModel>(config.nn_model,
+                                                           device_);
     } else if (class_name == "Wav2Vec2Model") {
       // This one is from torchaudio
       // https://github.com/pytorch/audio/blob/main/torchaudio/models/wav2vec2/model.py#L11
@@ -108,6 +119,10 @@ class OfflineRecognizerCtcImpl : public OfflineRecognizerImpl {
             "ASR/"
             "conformer_ctc/conformer.py#L27"
             "\n"
+            "https://github.com/k2-fsa/icefall/blob/master/egs/librispeech/"
+            "ASR/"
+            "zipformer/model.py"
+            "\n"
             "https://github.com/wenet-e2e/wenet/blob/main/wenet/transformer/"
             "asr_model.py#L42"
             "\n"
@@ -127,12 +142,42 @@ class OfflineRecognizerCtcImpl : public OfflineRecognizerImpl {
 
     WarmUp();
 
-    decoder_ = std::make_unique<OfflineCtcOneBestDecoder>(
-        config.ctc_decoder_config, device_, model_->VocabSize());
+    if (config.ctc_decoder_config.method == "prefix-beam-search") {
+      prefix_beam_decoder_ =
+          std::make_unique<OfflineCtcPrefixBeamSearchDecoder>(
+              config.ctc_decoder_config.num_active_paths,
+              config.ctc_decoder_config.top_k,
+              /*blank_id*/ 0);
+    } else if (config.ctc_decoder_config.method ==
+               "prefix-beam-search-shallow-fusion") {
+      shallow_fusion_decoder_ =
+          std::make_unique<OfflineCtcPrefixBeamSearchShallowFusionDecoder>(
+              config.ctc_decoder_config.num_active_paths,
+              /*blank_id*/ 0);
+    } else {
+      decoder_ = std::make_unique<OfflineCtcOneBestDecoder>(
+          config.ctc_decoder_config, device_, model_->VocabSize());
+    }
   }
 
   std::unique_ptr<OfflineStream> CreateStream() override {
     return std::make_unique<OfflineStream>(&fbank_, config_.feat_config);
+  }
+
+  std::unique_ptr<OfflineStream> CreateStream(
+      const std::vector<std::vector<int32_t>> &context_list) override {
+    const std::string &m = config_.ctc_decoder_config.method;
+    if (m != "prefix-beam-search" && m != "prefix-beam-search-shallow-fusion") {
+      SHERPA_LOG(FATAL)
+          << "Contextual biasing for CTC requires ctc_decoder_config.method "
+             "in {'prefix-beam-search','prefix-beam-search-shallow-fusion'}. "
+             "Current method='"
+          << m << "'.";
+    }
+    auto context_graph =
+        std::make_shared<ContextGraph>(context_list, config_.context_score);
+    return std::make_unique<OfflineStream>(&fbank_, config_.feat_config,
+                                           context_graph);
   }
 
   void DecodeStreams(OfflineStream **ss, int32_t n) override {
@@ -167,8 +212,25 @@ class OfflineRecognizerCtcImpl : public OfflineRecognizerImpl {
       log_prob_len = log_prob_len.to(log_prob.device());
     }
 
-    auto results =
-        decoder_->Decode(log_prob, log_prob_len, model_->SubsamplingFactor());
+    std::vector<OfflineCtcDecoderResult> results;
+    if (prefix_beam_decoder_ || shallow_fusion_decoder_) {
+      std::vector<ContextGraphPtr> context_graphs(n);
+      for (int32_t i = 0; i != n; ++i) {
+        context_graphs[i] = ss[i]->GetContextGraph();
+      }
+      if (prefix_beam_decoder_) {
+        results = prefix_beam_decoder_->Decode(log_prob, log_prob_len,
+                                               context_graphs,
+                                               model_->SubsamplingFactor());
+      } else {
+        results = shallow_fusion_decoder_->Decode(log_prob, log_prob_len,
+                                                  context_graphs,
+                                                  model_->SubsamplingFactor());
+      }
+    } else {
+      results = decoder_->Decode(log_prob, log_prob_len,
+                                 model_->SubsamplingFactor());
+    }
     for (int32_t i = 0; i != n; ++i) {
       ss[i]->SetResult(
           Convert(results[i], symbol_table_,
@@ -200,6 +262,9 @@ class OfflineRecognizerCtcImpl : public OfflineRecognizerImpl {
   SymbolTable symbol_table_;
   std::unique_ptr<OfflineCtcModel> model_;
   std::unique_ptr<OfflineCtcDecoder> decoder_;
+  std::unique_ptr<OfflineCtcPrefixBeamSearchDecoder> prefix_beam_decoder_;
+  std::unique_ptr<OfflineCtcPrefixBeamSearchShallowFusionDecoder>
+      shallow_fusion_decoder_;
   kaldifeat::Fbank fbank_;
   torch::Device device_;
   bool return_waveform_ = false;

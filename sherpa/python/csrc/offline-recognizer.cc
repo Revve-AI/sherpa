@@ -117,11 +117,13 @@ static void PybindOfflineCtcDecoderConfig(py::module &m) {  // NOLINT
       .def(py::init([](bool modified = true, const std::string &hlg = "",
                        float search_beam = 20, float output_beam = 8,
                        int32_t min_active_states = 20,
-                       int32_t max_active_states = 10000,
-                       float lm_scale =
-                           1.0f) -> std::unique_ptr<OfflineCtcDecoderConfig> {
+                       int32_t max_active_states = 10000, float lm_scale = 1.0f,
+                       const std::string &method = "one-best",
+                       int32_t num_active_paths = 8, int32_t top_k = 0)
+                        -> std::unique_ptr<OfflineCtcDecoderConfig> {
              auto ans = std::make_unique<OfflineCtcDecoderConfig>();
 
+             ans->method = method;
              ans->modified = modified;
              ans->hlg = hlg;
              ans->lm_scale = lm_scale;
@@ -130,6 +132,8 @@ static void PybindOfflineCtcDecoderConfig(py::module &m) {  // NOLINT
              ans->output_beam = output_beam;
              ans->min_active_states = min_active_states;
              ans->max_active_states = max_active_states;
+             ans->num_active_paths = num_active_paths;
+             ans->top_k = top_k;
 
              return ans;
            }),
@@ -137,7 +141,9 @@ static void PybindOfflineCtcDecoderConfig(py::module &m) {  // NOLINT
            py::arg("search_beam") = 20.0, py::arg("output_beam") = 8.0,
            py::arg("min_active_states") = 20,
            py::arg("max_active_states") = 10000, py::arg("lm_scale") = 1.0,
-           kOfflineCtcDecoderConfigInitDoc)
+           py::arg("method") = "one-best", py::arg("num_active_paths") = 8,
+           py::arg("top_k") = 0, kOfflineCtcDecoderConfigInitDoc)
+      .def_readwrite("method", &PyClass::method)
       .def_readwrite("modified", &PyClass::modified)
       .def_readwrite("hlg", &PyClass::hlg)
       .def_readwrite("search_beam", &PyClass::search_beam)
@@ -145,6 +151,8 @@ static void PybindOfflineCtcDecoderConfig(py::module &m) {  // NOLINT
       .def_readwrite("min_active_states", &PyClass::min_active_states)
       .def_readwrite("max_active_states", &PyClass::max_active_states)
       .def_readwrite("lm_scale", &PyClass::lm_scale)
+      .def_readwrite("num_active_paths", &PyClass::num_active_paths)
+      .def_readwrite("top_k", &PyClass::top_k)
       .def("__str__",
            [](const PyClass &self) -> std::string { return self.ToString(); })
       .def("validate", &PyClass::Validate);
@@ -163,7 +171,9 @@ static void PybindOfflineRecognizerConfig(py::module &m) {  // NOLINT
                        const OfflineCtcDecoderConfig &ctc_decoder_config = {},
                        const FeatureConfig &feat_config = {},
                        const FastBeamSearchConfig &fast_beam_search_config = {},
-                       const std::string &decoding_method = "greedy_search")
+                       const std::string &decoding_method = "greedy_search",
+                       float blank_penalty = 0.0f,
+                       int32_t max_sym_per_frame = 1)
                         -> std::unique_ptr<OfflineRecognizerConfig> {
              auto config = std::make_unique<OfflineRecognizerConfig>();
 
@@ -179,6 +189,8 @@ static void PybindOfflineRecognizerConfig(py::module &m) {  // NOLINT
              config->context_score = context_score;
              config->use_bbpe = use_bbpe;
              config->temperature = temperature;
+             config->blank_penalty = blank_penalty;
+             config->max_sym_per_frame = max_sym_per_frame;
 
              return config;
            }),
@@ -190,6 +202,7 @@ static void PybindOfflineRecognizerConfig(py::module &m) {  // NOLINT
            py::arg("feat_config") = FeatureConfig(),
            py::arg("fast_beam_search_config") = FastBeamSearchConfig(),
            py::arg("decoding_method") = "greedy_search",
+           py::arg("blank_penalty") = 0.0f, py::arg("max_sym_per_frame") = 1,
            kOfflineRecognizerConfigInitDoc)
       .def("__str__",
            [](const PyClass &self) -> std::string { return self.ToString(); })
@@ -205,6 +218,8 @@ static void PybindOfflineRecognizerConfig(py::module &m) {  // NOLINT
       .def_readwrite("context_score", &PyClass::context_score)
       .def_readwrite("use_bbpe", &PyClass::use_bbpe)
       .def_readwrite("temperature", &PyClass::temperature)
+      .def_readwrite("blank_penalty", &PyClass::blank_penalty)
+      .def_readwrite("max_sym_per_frame", &PyClass::max_sym_per_frame)
       .def("validate", &PyClass::Validate);
 }
 

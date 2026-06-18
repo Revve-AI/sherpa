@@ -186,6 +186,13 @@ OfflineTransducerModifiedBeamSearchDecoder::Decode(
     logits = logits.squeeze(1).squeeze(1);
     // now logits' shape is (num_hyps, vocab_size)
 
+    // Discourage blank emission before normalization. Pre-softmax penalty
+    // shifts the entire posterior away from blank; well-established trick
+    // (icefall: --blank-penalty) to combat deletion of repeated tokens.
+    if (blank_penalty_ > 0.0f) {
+      logits.index({torch::indexing::Slice(), blank_id}) -= blank_penalty_;
+    }
+
     auto log_probs = (logits / temperature_).log_softmax(-1).cpu();
 
     log_probs.add_(ys_log_probs);

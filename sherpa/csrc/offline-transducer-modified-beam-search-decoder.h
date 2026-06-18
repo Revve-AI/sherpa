@@ -17,10 +17,12 @@ class OfflineTransducerModifiedBeamSearchDecoder
  public:
   OfflineTransducerModifiedBeamSearchDecoder(OfflineTransducerModel *model,
                                              int32_t num_active_paths,
-                                             float temperature)
+                                             float temperature,
+                                             float blank_penalty = 0.0f)
       : model_(model),
         num_active_paths_(num_active_paths),
-        temperature_(temperature) {}
+        temperature_(temperature),
+        blank_penalty_(blank_penalty) {}
 
   /** Run modified beam search given the output from the encoder model.
    *
@@ -40,6 +42,7 @@ class OfflineTransducerModifiedBeamSearchDecoder
   OfflineTransducerModel *model_;  // Not owned
   int32_t num_active_paths_;
   float temperature_ = 1.0;
+  float blank_penalty_ = 0.0f;
 };
 
 }  // namespace sherpa

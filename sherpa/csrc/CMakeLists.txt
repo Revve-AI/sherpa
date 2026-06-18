@@ -11,6 +11,8 @@ set(sherpa_srcs
   offline-conformer-transducer-model.cc
   offline-ctc-greedy-search-decoder.cc
   offline-ctc-one-best-decoder.cc
+  offline-ctc-prefix-beam-search-decoder.cc
+  offline-ctc-prefix-beam-search-shallow-fusion-decoder.cc
   offline-model-config.cc
   offline-nemo-enc-dec-ctc-model-bpe.cc
   offline-sense-voice-model-config.cc
@@ -25,6 +27,7 @@ set(sherpa_srcs
   offline-whisper-model-config.cc
   offline-whisper-model-meta-data.cc
   offline-whisper-model.cc
+  offline-zipformer2-ctc-model.cc
   online-conformer-transducer-model.cc
   online-conv-emformer-transducer-model.cc
   online-emformer-transducer-model.cc

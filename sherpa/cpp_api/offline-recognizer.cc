@@ -19,6 +19,21 @@
 namespace sherpa {
 
 void OfflineCtcDecoderConfig::Register(ParseOptions *po) {
+  po->Register("ctc-decoding-method", &method,
+               "CTC decoding method. Possible values are: 'one-best' "
+               "(default, k2-based HLG/CTC-topo one-best) and "
+               "'prefix-beam-search' (label-space prefix beam search "
+               "with optional contextual biasing).");
+
+  po->Register("ctc-num-active-paths", &num_active_paths,
+               "Beam size for ctc prefix beam search. "
+               "Used only when --ctc-decoding-method=prefix-beam-search.");
+
+  po->Register("ctc-top-k", &top_k,
+               "Top-K vocab pruning per frame for ctc prefix beam search. "
+               "0 means use full vocab. "
+               "Used only when --ctc-decoding-method=prefix-beam-search.");
+
   po->Register("modified", &modified,
                "Used only for decoding with a CTC topology. "
                "true to use a modified CTC topology; useful when "
@@ -62,27 +77,49 @@ void OfflineCtcDecoderConfig::Register(ParseOptions *po) {
 }
 
 void OfflineCtcDecoderConfig::Validate() const {
-  if (!hlg.empty()) {
-    AssertFileExists(hlg);
+  if (method != "one-best" && method != "prefix-beam-search" &&
+      method != "prefix-beam-search-shallow-fusion") {
+    SHERPA_LOG(FATAL)
+        << "Unsupported --ctc-decoding-method: '" << method
+        << "'. Valid values are 'one-best', 'prefix-beam-search', and "
+           "'prefix-beam-search-shallow-fusion'.";
   }
 
-  SHERPA_CHECK_GT(search_beam, 0);
-  SHERPA_CHECK_GT(output_beam, 0);
-  SHERPA_CHECK_GE(min_active_states, 0);
-  SHERPA_CHECK_GE(max_active_states, 0);
+  if (method == "prefix-beam-search" ||
+      method == "prefix-beam-search-shallow-fusion") {
+    if (!hlg.empty()) {
+      SHERPA_LOG(WARNING)
+          << "--hlg is ignored when --ctc-decoding-method=" << method << ".";
+    }
+    SHERPA_CHECK_GT(num_active_paths, 0);
+    SHERPA_CHECK_GE(top_k, 0);
+  } else {
+    // method == "one-best"
+    if (!hlg.empty()) {
+      AssertFileExists(hlg);
+    }
+
+    SHERPA_CHECK_GT(search_beam, 0);
+    SHERPA_CHECK_GT(output_beam, 0);
+    SHERPA_CHECK_GE(min_active_states, 0);
+    SHERPA_CHECK_GE(max_active_states, 0);
+  }
 }
 
 std::string OfflineCtcDecoderConfig::ToString() const {
   std::ostringstream os;
 
   os << "OfflineCtcDecoderConfig(";
+  os << "method=\"" << method << "\", ";
   os << "modified=" << (modified ? "True" : "False") << ", ";
   os << "hlg=" << '\"' << hlg << '\"' << ", ";
   os << "lm_scale=" << lm_scale << ", ";
   os << "search_beam=" << search_beam << ", ";
   os << "output_beam=" << output_beam << ", ";
   os << "min_active_states=" << min_active_states << ", ";
-  os << "max_active_states=" << max_active_states << ")";
+  os << "max_active_states=" << max_active_states << ", ";
+  os << "num_active_paths=" << num_active_paths << ", ";
+  os << "top_k=" << top_k << ")";
 
   return os.str();
 }
@@ -123,6 +160,17 @@ void OfflineRecognizerConfig::Register(ParseOptions *po) {
   po->Register("temperature", &temperature,
                "Softmax temperature,. "
                "Used only when decoding_method is modified_beam_search.");
+
+  po->Register("blank-penalty", &blank_penalty,
+               "Subtracted from the blank logit before softmax in transducer "
+               "greedy / modified_beam_search. Positive values reduce blank "
+               "emission (helps deletion of repeated tokens). 0 disables.");
+
+  po->Register("max-sym-per-frame", &max_sym_per_frame,
+               "Maximum non-blank symbols emitted per encoder frame in "
+               "transducer greedy_search. Default 1 (icefall). Set 2-3 for "
+               "fast speech / repeated-token cases. "
+               "Ignored by modified_beam_search.");
 }
 
 void OfflineRecognizerConfig::Validate() const {
@@ -176,7 +224,9 @@ std::string OfflineRecognizerConfig::ToString() const {
   os << "num_active_paths=" << num_active_paths << ", ";
   os << "context_score=" << context_score << ", ";
   os << "use_bbpe=" << (use_bbpe ? "True" : "False") << ", ";
-  os << "temperature=" << temperature << ")";
+  os << "temperature=" << temperature << ", ";
+  os << "blank_penalty=" << blank_penalty << ", ";
+  os << "max_sym_per_frame=" << max_sym_per_frame << ")";
 
   return os.str();
 }

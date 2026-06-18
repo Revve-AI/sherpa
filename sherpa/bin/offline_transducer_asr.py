@@ -241,6 +241,26 @@ def add_modified_beam_search_args(parser: argparse.ArgumentParser):
         """,
     )
 
+    parser.add_argument(
+        "--blank-penalty",
+        type=float,
+        default=0.0,
+        help="""Subtracted from blank logit before softmax. Positive values
+        discourage blank → fewer deletions of repeated tokens.
+        Used by greedy_search and modified_beam_search. 0 disables.
+        Typical range: 1.0 - 3.0.""",
+    )
+
+    parser.add_argument(
+        "--max-sym-per-frame",
+        type=int,
+        default=1,
+        help="""Max non-blank symbols emitted per encoder frame in
+        greedy_search. Default 1 (icefall). Increase to 2-3 for fast speech
+        or repeated-token cases. Ignored by modified_beam_search /
+        fast_beam_search.""",
+    )
+
 
 def add_fast_beam_search_args(parser: argparse.ArgumentParser):
     parser.add_argument(
@@ -426,6 +446,8 @@ def create_recognizer(args) -> sherpa.OfflineRecognizer:
         decoding_method=args.decoding_method,
         fast_beam_search_config=fast_beam_search_config,
         temperature=args.temperature,
+        blank_penalty=getattr(args, "blank_penalty", 0.0),
+        max_sym_per_frame=getattr(args, "max_sym_per_frame", 1),
     )
 
     recognizer = sherpa.OfflineRecognizer(config)
