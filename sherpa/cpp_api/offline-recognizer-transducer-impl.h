@@ -77,7 +77,7 @@ class OfflineRecognizerTransducerImpl : public OfflineRecognizerImpl {
     } else if (config.decoding_method == "modified_beam_search") {
       decoder_ = std::make_unique<OfflineTransducerModifiedBeamSearchDecoder>(
           model_.get(), config.num_active_paths, config.temperature,
-          config.blank_penalty);
+          config.blank_penalty, config.context_max_gap);
     } else if (config.decoding_method == "fast_beam_search") {
       config.fast_beam_search_config.Validate();
 
@@ -99,7 +99,8 @@ class OfflineRecognizerTransducerImpl : public OfflineRecognizerImpl {
     // context_graph(will be added later if needed) that belongs to the whole
     // model rather than each stream.
     auto context_graph =
-        std::make_shared<ContextGraph>(context_list, config_.context_score);
+        std::make_shared<ContextGraph>(context_list, config_.context_score,
+                                       config_.context_max_gap > 0);
     return std::make_unique<OfflineStream>(&fbank_, config_.feat_config,
                                            context_graph);
   }

@@ -54,9 +54,12 @@ struct ContextState {
 class ContextGraph {
  public:
   ContextGraph() = default;
+  // bank_full_match: when a phrase is fully matched and no longer phrase
+  // continues it, ForwardOneStep keeps the phrase's bonus and returns the root
+  // (nothing left to take back later).
   ContextGraph(const std::vector<std::vector<int32_t>> &token_ids,
-               float context_score)
-      : context_score_(context_score) {
+               float context_score, bool bank_full_match = false)
+      : context_score_(context_score), bank_full_match_(bank_full_match) {
     root_ = std::make_unique<ContextState>(-1, 0, 0, 0, false);
     root_->fail = root_.get();
     Build(token_ids);
@@ -71,6 +74,7 @@ class ContextGraph {
 
  private:
   float context_score_;
+  bool bank_full_match_ = false;
   std::unique_ptr<ContextState> root_;
   void Build(const std::vector<std::vector<int32_t>> &token_ids) const;
   void FillFailOutput() const;

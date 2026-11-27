@@ -60,6 +60,12 @@ std::pair<float, const ContextState *> ContextGraph::ForwardOneStep(
     score = node->node_score - state->node_score;
   }
   SHERPA_CHECK(nullptr != node);
+  if (bank_full_match_ && node->is_end && node->next.empty()) {
+    // Matched bonus kept (node_score + output_score), pending bonus
+    // (node_score) settled now instead of when the hypothesis leaves.
+    return std::make_pair(score + node->output_score - node->node_score,
+                          root_.get());
+  }
   return std::make_pair(score + node->output_score, node);
 }
 

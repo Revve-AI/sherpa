@@ -150,6 +150,12 @@ void OfflineRecognizerConfig::Register(ParseOptions *po) {
                "The bonus score for each token in context word/phrase. "
                "Used only when decoding_method is modified_beam_search");
 
+  po->Register("context-max-gap", &context_max_gap,
+               "0 keeps the original context biasing. > 0: keep the bonus of "
+               "a fully matched phrase and take back a partial match's bonus "
+               "after this many blank-only encoder frames (stops deletions "
+               "after context phrases). Used only with modified_beam_search");
+
   po->Register("use-bbpe", &use_bbpe,
                "true if the model to use is trained with byte level bpe, "
                "The byte level bpe modeling unit is mainly used on CJK "
@@ -223,6 +229,7 @@ std::string OfflineRecognizerConfig::ToString() const {
   os << "decoding_method=\"" << decoding_method << "\", ";
   os << "num_active_paths=" << num_active_paths << ", ";
   os << "context_score=" << context_score << ", ";
+  os << "context_max_gap=" << context_max_gap << ", ";
   os << "use_bbpe=" << (use_bbpe ? "True" : "False") << ", ";
   os << "temperature=" << temperature << ", ";
   os << "blank_penalty=" << blank_penalty << ", ";

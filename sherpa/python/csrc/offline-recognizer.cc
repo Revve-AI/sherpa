@@ -173,7 +173,8 @@ static void PybindOfflineRecognizerConfig(py::module &m) {  // NOLINT
                        const FastBeamSearchConfig &fast_beam_search_config = {},
                        const std::string &decoding_method = "greedy_search",
                        float blank_penalty = 0.0f,
-                       int32_t max_sym_per_frame = 1)
+                       int32_t max_sym_per_frame = 1,
+                       int32_t context_max_gap = 0)
                         -> std::unique_ptr<OfflineRecognizerConfig> {
              auto config = std::make_unique<OfflineRecognizerConfig>();
 
@@ -191,6 +192,7 @@ static void PybindOfflineRecognizerConfig(py::module &m) {  // NOLINT
              config->temperature = temperature;
              config->blank_penalty = blank_penalty;
              config->max_sym_per_frame = max_sym_per_frame;
+             config->context_max_gap = context_max_gap;
 
              return config;
            }),
@@ -203,6 +205,7 @@ static void PybindOfflineRecognizerConfig(py::module &m) {  // NOLINT
            py::arg("fast_beam_search_config") = FastBeamSearchConfig(),
            py::arg("decoding_method") = "greedy_search",
            py::arg("blank_penalty") = 0.0f, py::arg("max_sym_per_frame") = 1,
+           py::arg("context_max_gap") = 0,
            kOfflineRecognizerConfigInitDoc)
       .def("__str__",
            [](const PyClass &self) -> std::string { return self.ToString(); })
@@ -220,6 +223,7 @@ static void PybindOfflineRecognizerConfig(py::module &m) {  // NOLINT
       .def_readwrite("temperature", &PyClass::temperature)
       .def_readwrite("blank_penalty", &PyClass::blank_penalty)
       .def_readwrite("max_sym_per_frame", &PyClass::max_sym_per_frame)
+      .def_readwrite("context_max_gap", &PyClass::context_max_gap)
       .def("validate", &PyClass::Validate);
 }
 

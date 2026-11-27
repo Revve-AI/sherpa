@@ -87,6 +87,17 @@ struct OfflineRecognizerConfig {
   /// used only for modified_beam_search
   float context_score = 1.5;
 
+  /// used only for modified_beam_search with contexts. 0 keeps the original
+  /// biasing. > 0: (1) a fully matched context phrase that no longer phrase
+  /// continues keeps its bonus and the hypothesis goes back to the root, and (2)
+  /// a hypothesis in the middle of a phrase that emits only blanks for more
+  /// than context_max_gap encoder frames gets its partial bonus taken back.
+  /// Without this the bonus of a (partial) match is taken back only when the
+  /// hypothesis emits a token outside the phrase, so hypotheses that stay
+  /// silent after a match outrank the ones that keep transcribing, and the
+  /// words after a context phrase get deleted.
+  int32_t context_max_gap = 0;
+
   // True if the model used is trained with byte level bpe.
   bool use_bbpe = false;
 
