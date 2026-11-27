@@ -238,6 +238,16 @@ OfflineTransducerModifiedBeamSearchDecoder::Decode(
             context_score = context_res.first;
             new_hyp.context_state = context_res.second;
           }
+        } else if (context_max_gap_ > 0 && context_graphs[k] != nullptr &&
+                   context_state != nullptr &&
+                   context_state != context_graphs[k]->Root() &&
+                   !new_hyp.timestamps.empty() &&
+                   t - new_hyp.timestamps.back() > context_max_gap_) {
+          // Blank-only for too long in the middle of a phrase: the phrase is
+          // not being said, take its partial bonus back now.
+          auto context_res = context_graphs[k]->Finalize(context_state);
+          context_score = context_res.first;
+          new_hyp.context_state = context_res.second;
         }
 
         // We already added log_prob of the path to log_probs before, so
